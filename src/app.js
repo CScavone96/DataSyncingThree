@@ -63,7 +63,7 @@ io.on('connection', (sock) => {
     if (socket.square.destY < 377) {
       socket.square.destY += 5;
     } else {
-      socket.square.dest = 377;
+      socket.square.destY = 377;
     }
     io.sockets.in('room1').emit('updatedMovement', socket.square);
   });
