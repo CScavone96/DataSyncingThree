@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://npmcdn.com/babel-core@5.8.38/browser.min.js"></script>
+    <link href="https://fonts.googleapis.com/css?family=Press+Start+2P|Roboto" rel="stylesheet">
+    <script type="text/babel" >
+        "use strict";
+        
+        let canvas;        
+        let ctx;     
+        let socket;        
+        let square = {
+          x: 0,
+          y: 0,
+          height: 50,
+          width: 30,
+        };       
+        
+        
+        let user = "unknown1";
+        
+        let draws = {};
+        
+        let bottom = 511;     
+        
+        let userFocus = true;
+        
+        let userColor;
+        
+        let userX;        
+        let userY;
+        let userWidth = 20;
+        let userHeight = 40;
+        
+        let userHit = false;
+        
+        let bgColors = [];
+        
+        let keyState = {};
+        window.addEventListener('keydown',function(e){ keyState[e.keyCode || e.which] = true; },true);    
+        window.addEventListener('keyup',function(e){ keyState[e.keyCode || e.which] = false; },true);
+                
+        const modifyFocus = (foc) => //Changes focus var
+        {
+            userFocus = foc;
+        }
+                
+        const keyPress = () => //Handles responses to key presses
+        {
+            let moved = false;
+            if(userFocus){
+                if (keyState[39] || keyState[68]) {
+                    let time = new Date().getTime();
+                    let xPos = userX;
+                    if(userX+3 < 511-userWidth){
+                        xPos = draws[user].x + 3;
+                    }
+                    else{
+                        xPos = 511-userWidth;
+                    }
+                    userX = xPos;
+                    let yPos = bottom-draws[user].height;
+                    userY = yPos;
+                    moved = true;
+                    draws[user] = {name: user, lastUpdate: time, x: xPos, y: yPos, width: draws[user].width, height: draws[user].height, isBlock: -1, color: userColor};    
+                }
+
+                if (keyState[37] || keyState[65]) {
+                    let time = new Date().getTime();
+                    let xPos = userX;
+                    if(userX-3 > 1){
+                        xPos = draws[user].x - 3;
+                    }
+                    else{
+                        xPos = 1;
+                    }
+                    userX = xPos;                   
+                    let yPos = bottom-draws[user].height;
+                    userY = yPos;
+                    moved = true;
+                    draws[user] = {name: user, lastUpdate: time, x: xPos, y: yPos, width: draws[user].width, height: draws[user].height, isBlock: -1, color: userColor};   
+                }
+            }
+            if(moved)
+            {
+                socket.emit('addPlayer',  draws[user]);    
+            }
+        }
+        
+        const checkCollision = (x, y, width, height) => { //Checks for collisions between client and blocks
+            if(userX < x + width &&
+            userX + userWidth > x &&
+            userY < y + height &&
+            userHeight + userY > y)
+            {
+                socket.emit('resetPoints',  {name: user, color: userColor}); 
+            }
+        };
+        
+        const setBGColor = (col) => { //Changes the background color of the game
+            if(!bgColors.includes(col))
+            {
+                bgColors.push(col);
+            }
+        };
+        
+        const updateDifficultyBar = (difficulty) => { //Expands the difficulty bar
+            let elem = document.getElementById("diffBar"); 
+            let width = difficulty;
+            elem.style.width = width + '%'; 
+        };
+        
+        const removePlayer = (data) => { //Removes player draws after disconnect
+            delete draws[data];
+        };
+        
+        const draw = () => { //Handles drawing client data
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          if(bgColors.length > 0){
+            let nextColor = bgColors.shift();
+            ctx.fillStyle = nextColor;
+            ctx.fillRect(0, 0, 512, 512);
+          }
+          ctx.strokeRect(0,0,512,512);   
+          keyPress();
+          let userDraw = "";
+          let keys = Object.keys(draws);
+          
+          for(let i = 0; i < keys.length; i++){
+            const drawCall = draws[keys[i]];
+            ctx.fillStyle = 'black';
+            
+            if(draws[keys[i]].isBlock === -1)
+            {
+                if(keys[i] != user)
+                {
+                    ctx.fillStyle = drawCall.color;
+                    ctx.strokeRect(drawCall.x, drawCall.y, drawCall.width, drawCall.height);
+                    ctx.fillRect(drawCall.x, drawCall.y, drawCall.width, drawCall.height);
+                }
+                else
+                {
+                    userDraw = drawCall;
+                }
+            }
+            else
+            {            
+                if (drawCall.y >=548)
+                {
+                    delete draws[keys[i]];
+                }
+                else
+                {
+                    ctx.fillRect(drawCall.x, drawCall.y, drawCall.width, drawCall.height);
+                    checkCollision(drawCall.x, drawCall.y, drawCall.width, drawCall.height);
+                }
+            }
+          }
+          if(userDraw != "")
+          {
+            ctx.fillStyle = userDraw.color;
+            ctx.strokeRect(userDraw.x, userDraw.y, userDraw.width, userDraw.height);
+            ctx.fillRect(userDraw.x, userDraw.y, userDraw.width, userDraw.height);
+          }
+        };            
+        
+        const connectSocket = () => { //Handles establishing a socket connection
+            canvas = document.getElementById("blockCanvas");
+            ctx = canvas.getContext("2d");
+            let playerList = document.getElementById("playerList");
+            socket = io.connect();
+            socket.on('connect', () => {
+                user = document.querySelector("#username").value;
+                userColor = document.querySelector("#colorid").value;
+                let elem = document.getElementById("diffBar"); 
+                elem.style.backgroundColor = userColor;
+                if(!user){
+                    user = 'unknown'
+                }
+                socket.emit('join', {name: user});      
+            });
+            socket.on('onJoined', () => {
+                onJoined();
+            });
+            socket.on('nameTaken', () => {
+                alert("Name is already in use, please try another");
+            });
+        };
+        
+        const onJoined = () => { //Handles client joining game/room
+            let time = new Date().getTime();
+            let xPos = Math.floor(Math.random()*(480-50)+50);
+            userX = xPos;
+            let yPos = bottom-userHeight;
+            userY = yPos;
+            let controls = document.getElementById("controls");
+            controls.style.display = "none";
+            draws[user] = {name: user, lastUpdate: time, x: xPos, y: yPos, width: userWidth, height: userHeight, isBlock: -1, color: userColor};   
+            socket.emit('addPlayer',  draws[user]);    
+            socket.on('clientUpdate', (data) => {
+                playerList.innerHTML = data;
+            });
+            socket.on('drawUpdate', (data) => {
+                let drawData = data.draws;
+                for (let i = 0; i < drawData.length; i++){
+                    if(drawData[i].name != user){
+                        draws[drawData[i].name] = drawData[i].coords;
+                    }
+                }
+                let difficulty = data.diff;
+                updateDifficultyBar(difficulty);
+                draw();
+            });   
+            socket.on('setBGColor', (data) => {
+                setBGColor(data);
+            });      
+            socket.on('removePlayer', (data) => {
+                removePlayer(data);
+            });     
+        };
+        
+        const init = () => { //Handles initializing  client
+            const connect = document.querySelector("#connect");
+            connect.addEventListener('click', connectSocket);           
+        };
+        
+        window.onload = init;
+        window.onblur = (function() //Handles blur detection
+        {
+            keyState = {};
+            modifyFocus(false);
+        });
+        window.onfocus = (function() //Handles reverse blur detection
+        {
+            modifyFocus(true);
+        });
+    </script>
+    <link rel="stylesheet" type="text/css" href="css/style.css">
+</head>
+<body>
+    <div id="center">
+        <div id="title">
+            <label>Falling Blocks Online</label>
+        </div>
+        <br/>
+        <div id="controls">
+            <label for="user">Username:</label>
+            <input id="username" name="user" type="text"/>
+            <label for="color">Color:</label>
+            <input id="colorid" name="color"type="color" value="#ff0000">
+            <input id="connect" type='button' value='connect'/>
+        </div>
+    </div>
+	<br/>
+    <canvas id="blockCanvas" height="512" width="512">No canvas</canvas>
+    <div id="diffProgress">
+        <div id="diffBar"></div>
+        <div id="diffLabel">Difficulty</div>
+    </div>
+    <br/>
+    <div id="playerDiv">
+        <label>Player List</label>
+        <ul id="playerList">No players</ul>
+    </div>
+</body>
+</html>
